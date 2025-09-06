@@ -300,7 +300,7 @@ def _generate_initial_story_stream():
         "위 규칙을 정확히 지켜 정확히 5문단의 이야기를 작성하라. "
         "[체크포인트 1: …]~[체크포인트 4: …], [엔딩: …] 형식을 반드시 지키고, "
         "각 문단은 하나의 구체적 사건만 다루며 두 인물이 모두 관여할 수 있도록 하라. "
-        "앞선 사건들이 플래그로 작용해 엔딩의 비극으로 이어지게 만들어라."
+        "각 문단이 자연스럽게 연결되어 엔딩의 비극으로 이어지게 만들어라."
     )
 
     messages = [
@@ -404,60 +404,60 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
     c1 = st.session_state.char1 or role
     c2 = st.session_state.char2 or victim
 
-    cp_turn = len(st.session_state.cp_logs.get(cp_idx, []))  
+    partner = c2 if role == c1 else c1
+
+    cp_turn = len(st.session_state.cp_logs.get(cp_idx, []))
     total_turn = int(st.session_state.turn)
     risk_now   = int(st.session_state.risk)
 
     rnd = random.Random(f"{total_turn}-{cp_idx}-{risk_now}")
     r = rnd.random()
 
-    # 톤 프로파일 선택
+    # 톤 종류 선택
     if cp_turn == 0:
-        tone_profile = "negative_anchor" if r < 0.6 else ("subtle_mixed" if r < 0.8 else "positive_feint")
+        tone_kind = "부정적" if r < 0.6 else ("미묘" if r < 0.8 else "긍정적")
+        tone_key  = "negative" if tone_kind == "부정적" else ("subtle" if tone_kind == "미묘" else "positive")
     else:
         if r < 0.4:
-            tone_profile = "positive_feint"
+            tone_kind, tone_key = "긍정적", "positive"
         elif r < 0.7:
-            tone_profile = "subtle_mixed"
+            tone_kind, tone_key = "미묘", "subtle"
         else:
-            tone_profile = "negative_anchor"
+            tone_kind, tone_key = "부정적", "negative"
 
-    # 공통 규칙
+    # 공통 규칙(플레이어 문장 보존 + 적용 범위 고정)
     base_rules = (
-        f"이 이야기는 '{c1}'와 '{c2}' 두 인물만 등장한다. "
-        f"플레이어는 '{role}', 피해자는 '{victim}'이다. "
-        "플레이어의 입력은 반드시 '{role}'의 구체적 대사/행동으로 반영하라. "
-        "이번 장면에서는 누구도 죽거나 완전히 구원받지 않는다(최종 결말 금지). "
-        "사건을 즉시 종결하지 말고, 이후 개입 여지를 남겨라. "
-        "메타 표현/설명은 금지한다. "
-        "가장 중요한 규칙: 이번 턴의 분위기는 단일 톤(부정적/긍정적/미묘)으로만 유지하고, "
-        "서술 중간에 정반대 톤으로 급전환하지 마라. "
-        "오직 두 사람 사이의 상호작용(대화/행동)만 묘사하라. "
-        "제3의 사람(친구/가족/경찰/의사/동료/목격자 등)의 고유명사/대사/능동적 결정을 등장시키지 마라. "
-        "외부 기관에 연락하거나 도움을 요청하는 장면도 금지한다. "
-        "배경 사물/환경(비, 도로, 신호, 차량 등)은 묘사 가능하되, 사람처럼 의사결정을 하지 않는다."
+        f"등장인물은 '{c1}'와 '{c2}' 두 명뿐이다. "
+        f"플레이어는 '{role}', 상대 인물은 '{partner}', 피해자는 '{victim}'이다. "
+        "아래 '플레이어 발화'는 글자 하나도 바꾸지 말고 **첫 문장으로 그대로** 넣어라. "
+        "따옴표/어미/조사/구두점/순서를 수정하거나 요약/확장/의역해서는 안 된다. "
+        f"이번 턴의 **장면 톤은 '{tone_kind}'** 이다. 이 톤은 **오직 상대 인물('{partner}')의 반응과 사건 서술**에만 적용한다. "
+        f"플레이어('{role}')의 첫 문장은 톤 적용 대상이 아니다. "
+        "한 문단(3~5문장)으로 작성하되, 이번 장면에서는 누구도 죽거나 완전히 구원받지 않는다(최종 결말 금지). "
+        "사건을 즉시 종결하지 말고 이후 개입 여지를 남겨라. "
+        "제3의 사람(친구/가족/경찰/의사/동료/목격자 등) 및 외부 기관/연락은 등장 금지. "
+        "배경 사물/환경은 묘사 가능하되 의사결정을 하지 않는다. "
+        "메타 표현/설명은 금지한다."
     )
 
-    # 톤별 보정
-    if tone_profile == "negative_anchor":
-        profile_rules = (
-            "이번 장면은 처음부터 끝까지 **일관되게 부정적**이어야 한다. "
-            "갈등, 짧은 대답, 회피, 불편한 기류를 유지하라. "
-            "중간에 사과, 화해, 긍정적 해결 조짐을 넣는 것은 절대로 금지한다. "
-            "STATUS 태그는 '<STATUS: risk_up1>' 또는 '<STATUS: neutral>' 중 하나여야 한다."
+    # 톤별 세부 지시(상대/서술에만 적용)
+    if tone_key == "negative":
+        tone_rules = (
+            f"상대 인물('{partner}')의 반응과 서술은 **일관되게 부정적**이어야 한다. "
+            "갈등/회피/짧은 대답/불편한 기류를 유지하고, 사과·화해·긍정적 해결 조짐은 넣지 마라. "
+            "STATUS 태그는 '<STATUS: risk_up1>' 또는 '<STATUS: neutral>' 중 하나만 허용한다."
         )
-    elif tone_profile == "positive_feint":
-        profile_rules = (
-            "이번 장면은 처음부터 끝까지 **일관되게 긍정적**이어야 한다. "
-            "웃음, 안도, 작은 화해, 따뜻한 기류를 보여주되, 근본 문제 해결은 금지한다. "
-            "중간에 고함, 갈등 심화 같은 부정적 요소를 넣는 것은 절대로 금지한다. "
+    elif tone_key == "positive":
+        tone_rules = (
+            f"상대 인물('{partner}')의 반응과 서술은 **일관되게 긍정적**이어야 한다. "
+            "안도/작은 화해/따뜻한 기류를 보여주되 근본 문제 해결은 금지한다. "
+            "부정적 요소(고함, 갈등 심화 등)는 넣지 마라. "
             "STATUS 태그는 반드시 '<STATUS: risk_down1>'만 사용한다."
         )
-    else:  # subtle_mixed
-        profile_rules = (
-            "이번 장면은 처음부터 끝까지 **겉보기엔 평온하나 미묘한 이상 신호가 1개만** 드러나야 한다. "
-            "분위기는 대체로 정상적이지만, 시선 회피, 말끝 흐림 같은 작은 불안을 심어라. "
-            "긍정적/부정적 급전환 없이 **미묘한 일관성**을 유지해야 한다. "
+    else:  # subtle
+        tone_rules = (
+            f"상대 인물('{partner}')의 반응과 서술은 **겉보기엔 평온하되 미묘한 이상 신호 1개만** 드러나야 한다. "
+            "긍정/부정의 급전환 없이 미묘한 일관성을 유지한다. "
             "STATUS 태그는 반드시 '<STATUS: neutral>'만 사용한다."
         )
 
@@ -468,16 +468,21 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
         "태그 앞뒤에는 마침표/쉼표/따옴표/괄호 등 문장부호를 두지 마라."
     )
 
-    rules = base_rules + profile_rules + status_tail
+    rules = base_rules + " " + tone_rules + " " + status_tail
 
     msgs = [{"role": "system", "content": rules}]
-    msgs.append({"role": "user", "content": f"원래 사건:\n{cp_body}"})
+    msgs.append({"role": "user", "content": f"원래 사건(두 사람만 등장):\n{cp_body}"})
     for ex in st.session_state.cp_logs.get(cp_idx, []):
         msgs.append({"role": "user", "content": f"{role}의 이전 개입: {ex['user']}"})
         msgs.append({"role": "assistant", "content": ex["assistant"]})
     msgs.append({
         "role": "user",
-        "content": f"{role}의 새로운 개입:\n{user_input}\n\n위 규칙에 따라 1문단으로 작성하라."
+        "content": (
+            f"플레이어 이름: {role}\n상대 인물: {partner}\n\n"
+            "플레이어 발화(첫 문장으로 그대로 사용):\n"
+            f"{user_input}\n\n"
+            "위 규칙에 따라 1문단으로 작성하라."
+        )
     })
     return msgs
 
