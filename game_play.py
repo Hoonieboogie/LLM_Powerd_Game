@@ -173,10 +173,13 @@ def _mode_past():
 def _mode_present():
     st.subheader("현재 결말 확인")
 
-    # 결말은 매번 새로 생성 (개입/리스크 변화가 즉시 반영되도록)
-    with st.spinner("결말 생성 중..."):
-        outcome = _generate_outcome_nonstream()
-        st.session_state.present_outcome = outcome
+    # 티켓 직후에는 결말을 다시 생성하지 않음
+    if not st.session_state.present_outcome:
+        with st.spinner("결말 생성 중..."):
+            outcome = _generate_outcome_nonstream()
+            st.session_state.present_outcome = outcome
+    else:
+        outcome = st.session_state.present_outcome
 
     # 태그 제거 후 본문 출력
     st.write(_strip_ending_tag(outcome))
@@ -428,7 +431,11 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
         "사건을 즉시 종결하지 말고, 이후 개입 여지를 남겨라. "
         "메타 표현/설명은 금지한다. "
         "가장 중요한 규칙: 이번 턴의 분위기는 단일 톤(부정적/긍정적/미묘)으로만 유지하고, "
-        "서술 중간에 정반대 톤으로 급전환하지 마라."
+        "서술 중간에 정반대 톤으로 급전환하지 마라. "
+        "오직 두 사람 사이의 상호작용(대화/행동)만 묘사하라. "
+        "제3의 사람(친구/가족/경찰/의사/동료/목격자 등)의 고유명사/대사/능동적 결정을 등장시키지 마라. "
+        "외부 기관에 연락하거나 도움을 요청하는 장면도 금지한다. "
+        "배경 사물/환경(비, 도로, 신호, 차량 등)은 묘사 가능하되, 사람처럼 의사결정을 하지 않는다."
     )
 
     # 톤별 보정
@@ -504,9 +511,16 @@ def _generate_outcome_nonstream() -> str:
     is_success = (risk <= -2 and touched_cnt >= 2 and improved_cnt >= 2)
 
     # ===== 결말 생성 지시 =====
+    only_two_rule = (
+        f"결말에서도 등장인물은 오직 '{c1}'와 '{c2}' 두 사람만 등장한다. "
+        "제3자(친구/가족/경찰/의사/목격자/군중/기관)의 고유명사/대사/능동적 결정은 금지한다. "
+        "배경 사물/환경은 묘사 가능하되 인격을 부여하지 마라. "
+    )
+
     if is_success:
         outcome_rules = (
-            "너는 이야기 결말을 쓰는 작가다. "
+            "너는 이야기 결말을 쓰는 작가다. " +
+            only_two_rule +
             "주어진 원래 이야기와 플레이어의 개입 기록을 바탕으로, "
             f"'{victim}'의 비극이 **완전히 막아진 해피엔딩**을 작성하라. "
             "플레이어의 개입 덕분에 문제가 근본적으로 해결되었음을 사건으로 구체적으로 보여주라. "
@@ -516,7 +530,8 @@ def _generate_outcome_nonstream() -> str:
         )
     else:
         outcome_rules = (
-            "너는 이야기 결말을 쓰는 작가다. "
+            "너는 이야기 결말을 쓰는 작가다. " +
+            only_two_rule +
             "주어진 원래 이야기와 플레이어의 개입 기록을 바탕으로, "
             f"'{victim}'의 비극이 **결국 피할 수 없는 실패 결말**로 이어지도록 작성하라. "
             "겉보기에는 잠시 좋아 보일 수 있으나, 반드시 근본 문제가 해결되지 않아 "
@@ -546,7 +561,12 @@ def _is_success(outcome: str) -> bool:
     return bool(m and m.group(1).lower() == "success")
 
 def _strip_ending_tag(text: str) -> str:
-    return re.sub(r"\s*<ENDING:\s*(?:success|failure)\s*>\s*$", "", text.strip())
+    return re.sub(
+        r"""["“”']?\s*<ENDING:\s*(?:success|failure)\s*>\s*["“”']?\s*$""",
+        "",
+        text.strip(),
+        flags=re.IGNORECASE
+    )
 
 # ====== 이름 추출 ======
 def _clean_korean_name(name: str) -> str:
