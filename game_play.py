@@ -173,12 +173,10 @@ def _mode_past():
 def _mode_present():
     st.subheader("현재 결말 확인")
 
-    # 결말은 한 번만 생성
-    if not st.session_state.present_outcome:
-        with st.spinner("결말 생성 중..."):
-            st.session_state.present_outcome = _generate_outcome_nonstream()
-
-    outcome = st.session_state.present_outcome
+    # 결말은 매번 새로 생성 (개입/리스크 변화가 즉시 반영되도록)
+    with st.spinner("결말 생성 중..."):
+        outcome = _generate_outcome_nonstream()
+        st.session_state.present_outcome = outcome
 
     # 태그 제거 후 본문 출력
     st.write(_strip_ending_tag(outcome))
@@ -198,6 +196,7 @@ def _mode_present():
             if st.button("🎟️ 티켓 사용하기 (체크포인트로 돌아가기)"):
                 # 스피너 없이 곧바로 선택 화면으로 이동
                 st.session_state.tickets -= 1
+                st.session_state.present_outcome = ""  # 결말 캐시 초기화
                 st.session_state.mode = "select_cp"
                 st.rerun()
         else:
@@ -332,17 +331,32 @@ def _stream_once_and_return(response_iter):
     return placeholder, acc
 
 def _strip_status(text: str):
-    m = re.search(r"<STATUS:\s*(?:(risk_up|risk_down)(\d+)?|neutral)\s*>", text, re.I)
+    """
+    출력 끝에 붙은 STATUS 태그를 파싱해 위험도(delta)를 계산하고,
+    플레이어에게 보이는 텍스트에서는 태그(및 감싼 따옴표/공백/문장부호)를 제거한다.
+    - 허용 예: <STATUS: risk_up1>, "<STATUS: risk_down2>", …<STATUS: neutral>
+    """
+    s = text.rstrip()
+    # 끝부분에 달린 태그(따옴표 포함 가능)를 탐지
+    tag_end_re = re.compile(
+        r"""["“”']?\s*<STATUS:\s*(?:(risk_up|risk_down)\s*([+-]?\d+)?|neutral)\s*>\s*["“”']?\s*$""",
+        re.IGNORECASE,
+    )
+    m = tag_end_re.search(s)
     delta = 0
     if m:
-        kind = m.group(1)
+        kind = (m.group(1) or "").lower()
         num  = m.group(2)
         if kind == "risk_up":
             delta = int(num or 1)
         elif kind == "risk_down":
             delta = -int(num or 1)
-    delta = max(-2, min(2, delta))  # clamp
-    visible = re.sub(r"\s*<STATUS:[^>]+>\s*$", "", text.strip(), flags=re.I)
+        # 과한 숫자 방지
+        delta = max(-2, min(2, delta))
+        visible = tag_end_re.sub("", s).rstrip()
+    else:
+        # 본문 어딘가에 섞여 있으면(규칙 위반 대비) 제거만 시도
+        visible = re.sub(r'["“”\']?\s*<STATUS:[^>]+>\s*["“”\']?', "", s, flags=re.I).rstrip()
     return visible, delta
 
 
@@ -441,9 +455,10 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
         )
 
     status_tail = (
-        "반드시 문단 마지막에 정확히 하나의 태그만 붙여라. "
-        "'<STATUS: risk_upN>', '<STATUS: risk_downN>', '<STATUS: neutral>' 중 하나이며 "
-        "N은 최대 2까지만 허용된다."
+        "문단의 '마지막 줄 끝'에 태그를 **따옴표 없이 단독으로** 정확히 1개 붙여라. "
+        "허용 형식: <STATUS: risk_upN>, <STATUS: risk_downN>, <STATUS: neutral>. "
+        "N 생략 시 1, N의 절대값 최대 2. "
+        "태그 앞뒤에는 마침표/쉼표/따옴표/괄호 등 문장부호를 두지 마라."
     )
 
     rules = base_rules + profile_rules + status_tail
