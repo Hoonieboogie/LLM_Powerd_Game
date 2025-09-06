@@ -159,8 +159,13 @@ def _mode_past():
             with st.spinner("스토리 생성 중..."):
                 messages = _build_cp_messages(cp_idx, cp_body, user_input)
                 visible_text = _generate_event_stream_and_update_risk(messages, cp_idx)
+
             st.session_state.cp_logs[cp_idx].append({"user": user_input, "assistant": visible_text})
             st.session_state.history.append((cp_idx, user_input, visible_text))
+
+            # 새 개입 반영 후 결말 캐시 무효화 (다음에 현재로 돌아가면 새 엔딩 생성)
+            st.session_state.present_outcome = ""
+
             st.success("턴 진행 완료!")
             st.rerun()
 
@@ -242,15 +247,12 @@ def _extract_checkpoints(text: str):
     paras = [p.strip() for p in text.strip().split("\n\n") if p.strip()]
     return paras[:5]
 
+
 def _highlight_checkpoints(text: str) -> str:
     pattern = r'\[(?:체크포인트\s*[1-5]|CP[1-5]|엔딩|결말)(?::[^\]]*)?\]'
     return re.sub(
         pattern,
-        lambda m: (
-            "<span style='color:#ff4b4b; font-weight:700; font-size:inherit; line-height:inherit'>"
-            + m.group(0) +
-            "</span>"
-        ),
+        lambda m: f"<span class='checkpoint-label'>{m.group(0)}</span>",
         text
     )
 
@@ -399,33 +401,38 @@ def _generate_event_stream_and_update_risk(messages, cp_idx: int) -> str:
     return visible
 
 def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
-    role = st.session_state.role.strip() or "플레이어"
+    role   = st.session_state.role.strip() or "플레이어"
     victim = st.session_state.victim.strip() or "피해자"
-    c1 = st.session_state.char1 or role
-    c2 = st.session_state.char2 or victim
-
+    c1     = st.session_state.char1 or role
+    c2     = st.session_state.char2 or victim
     partner = c2 if role == c1 else c1
 
-    cp_turn = len(st.session_state.cp_logs.get(cp_idx, []))
+    cp_turn    = len(st.session_state.cp_logs.get(cp_idx, []))
     total_turn = int(st.session_state.turn)
     risk_now   = int(st.session_state.risk)
 
     rnd = random.Random(f"{total_turn}-{cp_idx}-{risk_now}")
     r = rnd.random()
 
-    # 톤 종류 선택
+    # 톤 프로파일 선택
     if cp_turn == 0:
-        tone_kind = "부정적" if r < 0.6 else ("미묘" if r < 0.8 else "긍정적")
-        tone_key  = "negative" if tone_kind == "부정적" else ("subtle" if tone_kind == "미묘" else "positive")
+        tone_profile = "negative_anchor" if r < 0.6 else ("subtle_mixed" if r < 0.8 else "positive_feint")
     else:
         if r < 0.4:
-            tone_kind, tone_key = "긍정적", "positive"
+            tone_profile = "positive_feint"
         elif r < 0.7:
-            tone_kind, tone_key = "미묘", "subtle"
+            tone_profile = "subtle_mixed"
         else:
-            tone_kind, tone_key = "부정적", "negative"
+            tone_profile = "negative_anchor"
 
-    # 공통 규칙(플레이어 문장 보존 + 적용 범위 고정)
+    # 사람이 읽을 톤 이름
+    tone_kind = {
+        "negative_anchor": "부정적",
+        "positive_feint":  "긍정적",
+        "subtle_mixed":    "미묘"
+    }.get(tone_profile, "미묘")
+
+    # 공통 규칙
     base_rules = (
         f"등장인물은 '{c1}'와 '{c2}' 두 명뿐이다. "
         f"플레이어는 '{role}', 상대 인물은 '{partner}', 피해자는 '{victim}'이다. "
@@ -433,6 +440,8 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
         "따옴표/어미/조사/구두점/순서를 수정하거나 요약/확장/의역해서는 안 된다. "
         f"이번 턴의 **장면 톤은 '{tone_kind}'** 이다. 이 톤은 **오직 상대 인물('{partner}')의 반응과 사건 서술**에만 적용한다. "
         f"플레이어('{role}')의 첫 문장은 톤 적용 대상이 아니다. "
+        "상대 인물의 반응과 사건 서술은 **플레이어 발화의 직접적 결과**로 이어져야 하며, 인과 개연성을 절대로 훼손하지 마라. "
+        "예: 조언을 따른 경우 상대가 불만을 표현할 수는 있으나, '무시했다'와 같이 모순되는 반응은 금지. "
         "한 문단(3~5문장)으로 작성하되, 이번 장면에서는 누구도 죽거나 완전히 구원받지 않는다(최종 결말 금지). "
         "사건을 즉시 종결하지 말고 이후 개입 여지를 남겨라. "
         "제3의 사람(친구/가족/경찰/의사/동료/목격자 등) 및 외부 기관/연락은 등장 금지. "
@@ -440,24 +449,30 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
         "메타 표현/설명은 금지한다."
     )
 
-    # 톤별 세부 지시(상대/서술에만 적용)
-    if tone_key == "negative":
+    # 마커 출력 금지 규칙
+    marker_rule = (
+        "아래 마커 '<<<'와 '>>>'는 **입력 경계 표시용**이다. "
+        "**출력 텍스트에는 절대 포함하지 마라.** "
+        "첫 문장은 마커를 제거하고 **플레이어 발화 내용만** 그대로 넣어라."
+    )
+
+    # 톤별 규칙
+    if tone_profile == "negative_anchor":
         tone_rules = (
-            f"상대 인물('{partner}')의 반응과 서술은 **일관되게 부정적**이어야 한다. "
-            "갈등/회피/짧은 대답/불편한 기류를 유지하고, 사과·화해·긍정적 해결 조짐은 넣지 마라. "
-            "STATUS 태그는 '<STATUS: risk_up1>' 또는 '<STATUS: neutral>' 중 하나만 허용한다."
+            f"상대 인물('{partner}')의 반응과 서술은 **부정적 정서**(의심/냉담/회피/짜증 등)를 담되, "
+            "플레이어 발화 내용과 모순되지 않게 **합리적 맥락**을 유지하라. "
+            "STATUS 태그는 '<STATUS: risk_up1>' 또는 '<STATUS: neutral>' 중 하나만 사용한다."
         )
-    elif tone_key == "positive":
+    elif tone_profile == "positive_feint":
         tone_rules = (
-            f"상대 인물('{partner}')의 반응과 서술은 **일관되게 긍정적**이어야 한다. "
-            "안도/작은 화해/따뜻한 기류를 보여주되 근본 문제 해결은 금지한다. "
-            "부정적 요소(고함, 갈등 심화 등)는 넣지 마라. "
+            f"상대 인물('{partner}')의 반응과 서술은 **긍정적 정서**(따뜻함/안도/작은 화해/격려)를 드러내되, "
+            "근본 문제 해결 확정은 피하고 작은 숙제를 남겨라. "
             "STATUS 태그는 반드시 '<STATUS: risk_down1>'만 사용한다."
         )
-    else:  # subtle
+    else:  # subtle_mixed
         tone_rules = (
-            f"상대 인물('{partner}')의 반응과 서술은 **겉보기엔 평온하되 미묘한 이상 신호 1개만** 드러나야 한다. "
-            "긍정/부정의 급전환 없이 미묘한 일관성을 유지한다. "
+            f"상대 인물('{partner}')의 반응과 서술은 대체로 평온하되, **미묘한 이상 신호 1개만** 심어라 "
+            "(시선 회피, 말끝 흐리기 등). 급격한 정서 전환은 금지. "
             "STATUS 태그는 반드시 '<STATUS: neutral>'만 사용한다."
         )
 
@@ -468,20 +483,19 @@ def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
         "태그 앞뒤에는 마침표/쉼표/따옴표/괄호 등 문장부호를 두지 마라."
     )
 
-    rules = base_rules + " " + tone_rules + " " + status_tail
+    rules = base_rules + " " + marker_rule + " " + tone_rules + " " + status_tail
 
     msgs = [{"role": "system", "content": rules}]
-    msgs.append({"role": "user", "content": f"원래 사건(두 사람만 등장):\n{cp_body}"})
+    msgs.append({"role": "user", "content": f"원래 사건:\n{cp_body}"})
     for ex in st.session_state.cp_logs.get(cp_idx, []):
         msgs.append({"role": "user", "content": f"{role}의 이전 개입: {ex['user']}"})
         msgs.append({"role": "assistant", "content": ex["assistant"]})
     msgs.append({
         "role": "user",
         "content": (
-            f"플레이어 이름: {role}\n상대 인물: {partner}\n\n"
-            "플레이어 발화(첫 문장으로 그대로 사용):\n"
-            f"{user_input}\n\n"
-            "위 규칙에 따라 1문단으로 작성하라."
+            "플레이어 발화(첫 문장에 그대로 삽입, 변경 금지):\n"
+            f"<<<\n{user_input}\n>>>\n\n"
+            "위 규칙에 따라 1문단(3~5문장)으로 작성하라."
         )
     })
     return msgs
@@ -509,13 +523,22 @@ def _generate_outcome_nonstream() -> str:
 
     # 현재 누적 상태
     risk = int(st.session_state.risk)
-    touched_cnt  = len(st.session_state.get("touched_cps", set()))
-    improved_cnt = len(st.session_state.get("improved_cps", set()))
+    touched = st.session_state.get("touched_cps", set())
+    improved = st.session_state.get("improved_cps", set())
+    touched_cnt  = len(touched)
+    improved_cnt = len(improved)
 
-    # ===== 성공/실패 조건 =====
+    # 성공/실패 기준
     is_success = (risk <= -2 and touched_cnt >= 2 and improved_cnt >= 2)
 
-    # ===== 결말 생성 지시 =====
+    # 실패 모드 분기(원인 유지 vs 나비효과)
+    worsened_cnt = max(0, touched_cnt - improved_cnt)  # 악화로 볼 수 있는 개입 수 추정
+    if not is_success:
+        if improved_cnt == 0 or worsened_cnt > 0:
+            failure_mode = "same"        # 원래 원인이 그대로 남아 같은 형태의 비극
+        else:
+            failure_mode = "butterfly"   # 일부 완화는 되었으나 다른 조합으로 비극(새 형태)
+
     only_two_rule = (
         f"결말에서도 등장인물은 오직 '{c1}'와 '{c2}' 두 사람만 등장한다. "
         "제3자(친구/가족/경찰/의사/목격자/군중/기관)의 고유명사/대사/능동적 결정은 금지한다. "
@@ -528,20 +551,37 @@ def _generate_outcome_nonstream() -> str:
             only_two_rule +
             "주어진 원래 이야기와 플레이어의 개입 기록을 바탕으로, "
             f"'{victim}'의 비극이 **완전히 막아진 해피엔딩**을 작성하라. "
-            "플레이어의 개입 덕분에 문제가 근본적으로 해결되었음을 사건으로 구체적으로 보여주라. "
-            "두 사람의 관계가 회복되고, 서로 신뢰하며 미래가 안정적이라는 점을 드러내라. "
+            "플레이어의 개입 덕분에 문제가 근본적으로 해결되었음을 **구체적 사건**으로 보여주라. "
+            "가능하면 어떤 체크포인트의 위험이 어떻게 상쇄/해결되었는지 1~2문장으로 자연스럽게 드러내라. "
+            "두 사람의 관계가 회복되고, 서로 신뢰하며 미래가 안정적이라는 점을 분명히 하라. "
             "불안, 단서, 갈등, 여운은 절대로 남기지 마라. "
             "마지막에 반드시 '<ENDING: success>'를 붙여라."
         )
     else:
+        if failure_mode == "same":
+            failure_hint = (
+                "이번 실패는 **원래 비극의 원인 조합이 그대로 유지**되어 발생한다. "
+                "원래 이야기의 [체크포인트]들 중 **최소 2개**의 위험 플래그가 **그대로 겹쳐** 비극이 일어났음을 "
+                "1~2문장으로 **명확히 드러내라**(예: \"[체크포인트 2]의 늦은 연락과 [체크포인트 4]의 무리한 운전이 다시 겹쳤다\"). "
+                "가능하면 원래 엔딩과 **동일한 유형의 비극**으로 귀결되게 하라."
+            )
+        else:  # butterfly
+            failure_hint = (
+                "이번 실패는 **나비효과**로 인해 **원래와 다른 형태의 비극**이 발생한다. "
+                "플레이어의 개입으로 완화/변경된 위험(예: 한 체크포인트의 문제)은 있었으나, "
+                "그로 인해 **다른 플래그 조합이나 새로운 변수**가 겹쳐 **다른 유형의 상실/사고**로 이어졌음을 "
+                "1~2문장으로 **명확히 드러내라**(예: \"[체크포인트 1]의 일정은 조정했지만, 그 탓에 [체크포인트 3]의 약속이 엇갈렸다\"). "
+                "원래 엔딩과 **유형이 겹치지 않도록** 유의하라."
+            )
+
         outcome_rules = (
             "너는 이야기 결말을 쓰는 작가다. " +
             only_two_rule +
             "주어진 원래 이야기와 플레이어의 개입 기록을 바탕으로, "
             f"'{victim}'의 비극이 **결국 피할 수 없는 실패 결말**로 이어지도록 작성하라. "
-            "겉보기에는 잠시 좋아 보일 수 있으나, 반드시 근본 문제가 해결되지 않아 "
+            + failure_hint + " "
+            "겉보기에는 잠시 좋아 보일 수 있으나, 근본 문제가 해결되지 않아 "
             f"'{victim}'이(가) 상실 또는 죽음에 도달해야 한다. "
-            "희망적인 결말처럼 보이는 서술은 절대로 금지한다. "
             "사건의 인과관계를 통해 비극이 불가피함을 보여라. "
             "마지막에 반드시 '<ENDING: failure>'를 붙여라."
         )
@@ -608,8 +648,8 @@ def _extract_cast_and_victim(story_text: str):
             ],
         )
         raw = resp.choices[0].message.content.strip()
-        # 혹시 코드펜스(````json … ````)로 출력되면 제거
-        raw = raw.strip('`').strip()
+        # 혹시 코드펜스(````json````)로 출력되면 제거
+        raw = raw.strip("```").strip()
         if raw.startswith("json"):
             raw = raw[4:].strip()
         data = json.loads(raw)
