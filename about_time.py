@@ -4,7 +4,7 @@ import base64
 
 st.set_page_config(page_title="About Time 🍂", layout="wide")
 
-# ===== 배경 이미지 설정 =====
+# 배경 이미지 설정
 def get_base64_of_image(image_file):
     with open(image_file, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -38,7 +38,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"], .main .block-container {
 </style>
 """, unsafe_allow_html=True)
 
-# ===== 텍스트 & 버튼 스타일 =====
+# 텍스트 & 버튼 스타일
 st.markdown("""
 <style>
 /* 본문 텍스트 */
@@ -59,7 +59,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== 제목 폰트 =====
+# 제목 폰트 서식
 st.markdown("""
 <link href="https://fonts.googleapis.com/css2?family=Shadows+Into+Light&display=swap" rel="stylesheet">
 <style>
@@ -73,7 +73,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== 체크포인트 강조 =====
+# 체크포인트 강조
 st.markdown("""
 <style>
 .checkpoint-label {
@@ -83,7 +83,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===== Select Box 폰트 색깔 =====
+# Select Box 폰트 색깔
 st.markdown("""
 <style>
 /* selectbox 텍스트 색상 */
@@ -93,16 +93,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-"""흰색으로 바꿀 때
-.stSelectbox div[data-baseweb="select"] * {
-  color: #4B2E2E !important;   /* 진한 갈색 */
+# 사용자 인풋 텍스트
+st.markdown("""
+<style>
+/* text_input 인풋 박스 텍스트 색상 변경 */
+input[type="text"] {
+    color: white !important;          /* 입력 텍스트 색상 */
+    background-color: #2b2b2b !important;  /* 배경 (원하면 어둡게) */
+    border: 1px solid #ccc !important;    /* 테두리 */
+    border-radius: 5px;
+    padding: 8px;
 }
-"""
+</style>
+""", unsafe_allow_html=True)
 
-# ===== 제목 =====
+
+# 랜딩 페이지 
 st.markdown("<div class='handwriting-title'>About Time 🍂</div>", unsafe_allow_html=True)
 
-# ===== 랜딩 페이지 =====
 if "started" not in st.session_state:
     st.session_state.started = False
 

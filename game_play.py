@@ -260,11 +260,11 @@ def _generate_initial_story_stream():
     system_query = """ 
     너는 최고의 시나리오 작가다. 
     아래 규칙을 모두 지켜 ‘대한민국’을 배경으로 한 자연스럽고 개연성 있는 **연인의 죽음** 서사를 정확히 5문단으로 작성하라.
-    다시 한 번 기억하라. 너는 최고의 시나리오 작가다.
+    다시 한 번 기억하라. 너는 최고의 시나리오 작가다. 다양한 소재로 스토리를 만들어라.
 
     [형식]
     - 각 문단은 반드시 다음 머리표로 시작한다: [체크포인트 1: 소제목 1] … [체크포인트 4: 소제목 4], [엔딩: 소제목 5]
-    - 소제목은 문단의 핵심 사건을 요약한 짧고 자연스러운 한국어 표현(예: “늦은 연락”, “위험한 선택”)으로 작성한다.
+    - 소제목은 문단의 핵심 사건을 요약한 짧고 자연스러운 한국어 표현으로 작성한다.
     - 머리표 다음 줄에서 바로 본문을 시작하며, 본문은 줄바꿈 이후에만 작성한다.
     - 정확히 5문단만 출력한다. 제목/서론/요약/맺음말/추가 문구/메타 발언은 금지한다(머리표 제외).
 
@@ -291,8 +291,6 @@ def _generate_initial_story_stream():
     - 성인이 쉽게 이해할 수 있는 **직관적인 한국어**로 쓴다. 영문 철자 금지(외래어는 한글 표기).
     - 추상적·과장된 표현 금지: “비극의 기로”, “운명의 굴레”, “영혼 깊숙이” 등.
     - 등장인물의 대사는 반드시 **일상적이고 현실적인 한국어 대화**여야 한다.
-    - 예: “요즘 너무 바쁜 것 같아”, “나 혼자만 애쓰는 기분이야”, “잠깐 얘기 좀 할 수 있어?” 등
-    - 금지: “내가 필요해”, “너 없인 살 수 없어”, “비극의 기로에 섰어” 등
     - 각 문단은 3~5문장으로 간결하게 쓴다.
 
     명심해라. 전체 스토리 설정과 전개는 모두 타당하고 자연스러워야 해. 너가 최고의 작가라는 것을 잊지마.
@@ -397,7 +395,10 @@ def _generate_event_stream_and_update_risk(messages, cp_idx: int) -> str:
         st.session_state.improved_cps.add(cp_idx)
 
     # 태그 제거본을 인용문 블록으로 통일해서 덮어쓰기
-    placeholder.markdown(_normalize_markdown(visible), unsafe_allow_html=True)
+    placeholder.markdown(
+    f"<div class='assistant-reply'>{visible}</div>",
+    unsafe_allow_html=True
+    )
     return visible
 
 def _build_cp_messages(cp_idx: int, cp_body: str, user_input: str):
